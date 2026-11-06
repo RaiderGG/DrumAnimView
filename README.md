@@ -8,6 +8,7 @@ A small Reaper visualization script that turns Rock Band style drummer animation
 
 - Animated drum kit visualization based on MIDI drum note data
 - Adjustable timing offset, hand opacity, and display scale
+- Hand labels with customizable color for visual clarity
 
 ## Requirements
 

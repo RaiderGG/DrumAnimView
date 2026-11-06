@@ -1,8 +1,78 @@
 local r = reaper
 package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
---local gfx = require "gfx2imgui"
-local assets_folder = (string.gsub(debug.getinfo(1).source:match("@?(.*[\\|/])"),"\\","/").."assets/")
-local SCALE = 0.5
+local gfx = require "gfx2imgui"
+local script_folder = string.gsub(debug.getinfo(1).source:match("@?(.*[\\|/])"),"\\","/")
+local assets_folder = script_folder .. "assets/"
+local settings_file = script_folder .. "settings.ini"
+local settings = {
+    scale = 0.5,
+    labelsVisible = false,
+    labelColor = {r = 1, g = 1, b = 0},
+    handAlpha = 1
+}
+
+local function LoadSettings()
+    local file = io.open(settings_file, "r")
+    if not file then return end
+
+    local values = {}
+    for line in file:lines() do
+        local key, value = line:match("^([%w_]+)%s*=%s*(.-)%s*$")
+        if key then values[key] = value end
+    end
+    file:close()
+
+    local savedScale = tonumber(values.scale)
+    if savedScale then
+        for _, validScale in ipairs({0.25, 0.375, 0.5, 0.75, 1}) do
+            if savedScale == validScale then
+                settings.scale = savedScale
+                break
+            end
+        end
+    end
+    if values.labels_visible == "true" then
+        settings.labelsVisible = true
+    elseif values.labels_visible == "false" then
+        settings.labelsVisible = false
+    end
+    for _, channel in ipairs({"r", "g", "b"}) do
+        local value = tonumber(values["label_color_" .. channel])
+        if value and value >= 0 and value <= 1 then
+            settings.labelColor[channel] = value
+        end
+    end
+    local handAlpha = tonumber(values.hand_alpha)
+    if handAlpha and handAlpha >= 0 and handAlpha <= 1 then
+        settings.handAlpha = handAlpha
+    end
+end
+
+local function SaveSettings()
+    local file, err = io.open(settings_file, "w")
+    if not file then
+        r.ShowConsoleMsg("DrumAnimView: Could not write " .. settings_file .. ": " .. tostring(err) .. "\n")
+        return
+    end
+
+    local ok, writeError = file:write(
+        "scale=", tostring(settings.scale), "\n",
+        "labels_visible=", tostring(settings.labelsVisible), "\n",
+        "label_color_r=", tostring(settings.labelColor.r), "\n",
+        "label_color_g=", tostring(settings.labelColor.g), "\n",
+        "label_color_b=", tostring(settings.labelColor.b), "\n",
+        "hand_alpha=", tostring(settings.handAlpha), "\n"
+    )
+    local closeOk, closeError = file:close()
+    if not ok or not closeOk then
+        r.ShowConsoleMsg("DrumAnimView: Could not write " .. settings_file .. ": "
+            .. tostring(writeError or closeError) .. "\n")
+    end
+end
+
+LoadSettings()
+
+local SCALE = settings.scale
 local window = {
     width = 1600 * SCALE,
     height = 1000 * SCALE
@@ -10,7 +80,7 @@ local window = {
 local COLS = 4
 local ROWS = 2
 local HAND_MOVE_MIN_TIME = 0.01
-local HAND_MOVE_MAX_TIME = 1
+local HAND_MOVE_MAX_TIME = 0.8
 local HAND_MOVE_AFTER_HIT = 0.05
 local HAND_HARD_LIFT = 120
 local HAND_HIT_DURATION = 0.30
@@ -41,7 +111,7 @@ local slider = {
         y = 140,
         w = 400,
         h = 40,
-        value = 1,
+        value = settings.handAlpha,
         min = 0,
         max = 1,
         default = 1,
@@ -55,7 +125,24 @@ local scaleSelector = {
     buttonW = 200,
     buttonH = 40
 }
-local scaleOptions = {
+local handLabels = {
+    x = 680,
+    y = 60,
+    buttonW = 200,
+    buttonH = 40,
+    visible = settings.labelsVisible,
+    color = settings.labelColor
+}
+local labelColorPicker = {
+    x = 900,
+    y = 60,
+    buttonW = 235,
+    buttonH = 40,
+    open = false,
+    dragChannel = nil
+}
+
+local scaleOptions = {  --Scale values are halved compared to its labels to compensate for texture sizes.
     {value = 0.25, label = "0.5x"},
     {value = 0.375, label = "0.75x"},
     {value = 0.5, label = "1x"},
@@ -88,7 +175,7 @@ local hands = {
         visible = false
     }
 }
-local at_rel={
+local att_rel={
     kick= {20,85},
     hihat={70,40}
 }
@@ -235,17 +322,17 @@ end
 
 local function updatePedalStates(time)
     local kickLevel = 0
-    local kickAttack = math.max(0, at_rel.kick[1]) / 1000
+    local kickAttack = math.max(0, att_rel.kick[1]) / 1000
     for _, note in ipairs(kickNotes) do
         local startTime = note[2]
-        local level = eventLevel(time, startTime - kickAttack, startTime, at_rel.kick[1], at_rel.kick[2])
+        local level = eventLevel(time, startTime - kickAttack, startTime, att_rel.kick[1], att_rel.kick[2])
         kickLevel = math.max(kickLevel, level)
     end
     kick.state = kickLevel
 
     local hihatLevel = 0
     for _, note in ipairs(hhPedalNotes) do
-        local level = eventLevel(time, note[2], note[3]-at_rel.hihat[2]/1000, at_rel.hihat[1], at_rel.hihat[2])
+        local level = eventLevel(time, note[2], note[3]-att_rel.hihat[2]/1000, att_rel.hihat[1], att_rel.hihat[2])
         hihatLevel = math.max(hihatLevel, level)
     end
     hihat.state = hihatLevel
@@ -332,11 +419,6 @@ local function updateNotes(time)
             else
                 movementStart = nextNote[2] - moveTime
             end
-            if isReturningAfterGap and previousNote then
-                local gapStart = previousNote[2] + HAND_GAP_TIMEOUT
-                movementStart = math.max(movementStart, gapStart)
-                moveTime = math.max(0, nextNote[2] - movementStart)
-            end
             local fadeAlphaAtMovementStart = 0
             if isReturningAfterGap and previousNote then
                 local previousMapping = drumMap[previousNote[1]]
@@ -359,11 +441,11 @@ local function updateNotes(time)
                     and math.min(1, math.max(0,
                         (time - movementStart) / moveTime))
                     or 1
-                local easedProgress = progress * progress * (3 - 2 * progress)
+                local easedProgress = progress * progress * (3 - 2 * progress) --Smooth animation
                 hand.posX = startX + (targetX - startX) * easedProgress
                 hand.posY = startY + (targetY - startY) * easedProgress
                     - liftAmount * math.sin(math.pi * easedProgress)
-                if isReturningAfterGap then
+                if isReturningAfterGap then  
                     local fadeInProgress = fadeInTime > 0
                         and math.min(1, math.max(0,
                             (time - movementStart) / fadeInTime))
@@ -459,10 +541,11 @@ local function updateNotes(time)
             or 1
         local hitStrength = math.max(0, 1 - math.abs(hitPhase * 2 - 1))
         hand.hitOffsetY = HAND_HIT_DROP * hitStrength
-        local heightProgress = math.min(1, math.max(0,
+        --Hand height modifies scale to simulate distance from camera
+        local heightScale = math.min(1, math.max(0,
             (hand.posY / SCALE - HAND_SCALE_TOP_Y) /
             (HAND_SCALE_BOTTOM_Y - HAND_SCALE_TOP_Y)))
-        hand.scale = HAND_SCALE_MIN + (HAND_SCALE_MAX - HAND_SCALE_MIN) * heightProgress
+        hand.scale = HAND_SCALE_MIN + (HAND_SCALE_MAX - HAND_SCALE_MIN) * heightScale
         hand.visible = true
     end
 
@@ -470,16 +553,17 @@ local function updateNotes(time)
     updateHand(hands.R, rHandNotes)
 end
 
---draw current frame of sprite sheet
-local function DrawSpriteFrame(image, frame, dx, dy)
+--draw current frame of part
+local function DrawPart(image, part)
+    local frame = part.curframe
+    local dx = part.posX
+    local dy = part.posY
     local w, h = gfx.getimgdim(image)
-
     local fw = w / COLS
     local fh = h / ROWS
 
     local sx = (frame % COLS) * fw
     local sy = math.floor(frame / COLS) * fh
-
     gfx.blit(
         image,SCALE,0,
         sx,sy,fw,fh,
@@ -489,17 +573,25 @@ end
 
 local function DrawHand(image, hand)
     if not hand.visible then return end
-
+    local char = {[3] = 'L', [4] = 'R'}
     local w, h = gfx.getimgdim(image)
     local fw, fh = w / COLS, h / ROWS
     local sx = (hand.frame % COLS) * fw
     local sy = math.floor(hand.frame / COLS) * fh
-    local drawW, drawH = fw * SCALE * hand.scale, fh * SCALE * hand.scale
-    gfx.a = hand.alpha * slider.handAlpha.value
-    gfx.blit(image, SCALE, 0, sx, sy, fw, fh,
-        hand.posX + hand.offsetX * SCALE - drawW / 2,
-        hand.posY + (hand.hitOffsetY + HAND_POSITION_OFFSET_Y) * SCALE,
-        drawW, drawH)
+    local handScale = SCALE * hand.scale
+    local drawW, drawH = fw * handScale, fh * handScale
+    local drawX = hand.posX + hand.offsetX * SCALE - drawW / 2
+    local drawY = hand.posY + (hand.hitOffsetY + HAND_POSITION_OFFSET_Y) * SCALE
+    local alpha = hand.alpha * slider.handAlpha.value
+    gfx.a = alpha
+    gfx.blit(image, SCALE, 0, sx, sy, fw, fh, drawX, drawY, drawW, drawH)
+    if handLabels.visible then
+        gfx.x = drawX + (fw / 2 - 7) * handScale
+        gfx.y = drawY + 340 * handScale
+        gfx.set(handLabels.color.r, handLabels.color.g, handLabels.color.b, alpha)
+        gfx.setfont(1,nil,math.max(1, math.floor(40 * handScale)),tonumber("b"))
+        gfx.drawstr(char[image])
+    end
     gfx.a = 1
 end
 --test sliders
@@ -516,7 +608,7 @@ local function UpdateSlider(curslider, mousePressed)
         mx <= x + w and
         my >= y and
         my <= y + h
-
+        --vertically spaced filters for clarity
     local mouseDown = gfx.mouse_cap & 1 == 1
 
     if mousePressed and hovered then
@@ -558,7 +650,7 @@ local function UpdateSlider(curslider, mousePressed)
 
     end
 end
---test sliders 
+
 local function SetControlFont()
     gfx.setfont(1, "Arial", math.max(1, math.floor(32 * SCALE)))
 end
@@ -589,6 +681,8 @@ local function SetScale(scale)
     if SCALE == scale then return end
 
     SCALE = scale
+    settings.scale = scale
+    SaveSettings()
     window.width = math.floor(1600 * SCALE)
     window.height = math.floor(1000 * SCALE)
     hihat.posX = 280 * SCALE
@@ -651,6 +745,133 @@ local function DrawScaleSelector()
     gfx.drawstr(text)
 end
 
+local function UpdateHandLabels(mousePressed)
+    if not mousePressed then return end
+
+    local mx = gfx.mouse_x
+    local my = gfx.mouse_y
+    local x, y, buttonW, buttonH = handLabels.x * SCALE,
+        handLabels.y * SCALE, handLabels.buttonW * SCALE,
+        handLabels.buttonH * SCALE
+    if mx >= x and mx <= x + buttonW and my >= y and my <= y + buttonH then
+        handLabels.visible = not handLabels.visible
+        settings.labelsVisible = handLabels.visible
+        SaveSettings()
+    end
+end
+
+local function DrawHandLabelsToggle()
+    local x, y, buttonW, buttonH = handLabels.x * SCALE,
+        handLabels.y * SCALE, handLabels.buttonW * SCALE,
+        handLabels.buttonH * SCALE
+    SetControlFont()
+    gfx.set(0.2, 0.2, 0.2, 1)
+    gfx.rect(x, y, buttonW, buttonH, 1)
+    gfx.set(0.9, 0.9, 0.9, 1)
+    local text = "Labels: " .. (handLabels.visible and "On" or "Off")
+    local textW, textH = gfx.measurestr(text)
+    gfx.x = x + (buttonW - textW) / 2
+    gfx.y = y + (buttonH - textH) / 2
+    gfx.drawstr(text)
+end
+
+local labelColorChannels = {"r", "g", "b"}
+local labelColorChannelNames = {"R", "G", "B"}
+
+local function GetLabelColorChannelRect(channel)
+    local x = (labelColorPicker.x + 120) * SCALE
+    local y = (labelColorPicker.y + 52 + (channel - 1) * 38) * SCALE
+    local w = 220 * SCALE
+    local h = 24 * SCALE
+    return x, y, w, h
+end
+
+local function SetLabelColorChannel(channel, mouseX)
+    local x, _, w = GetLabelColorChannelRect(channel)
+    local value = math.max(0, math.min(1, (mouseX - x) / w))
+    handLabels.color[labelColorChannels[channel]] = value
+    settings.labelColor[labelColorChannels[channel]] = value
+end
+
+local function UpdateLabelColorPicker(mousePressed, mouseDown)
+    if not mouseDown then
+        labelColorPicker.dragChannel = nil
+    elseif labelColorPicker.dragChannel then
+        SetLabelColorChannel(labelColorPicker.dragChannel, gfx.mouse_x)
+    end
+    if not mousePressed then return end
+
+    local mx = gfx.mouse_x
+    local my = gfx.mouse_y
+    local buttonX, buttonY = labelColorPicker.x * SCALE,
+        labelColorPicker.y * SCALE
+    if mx >= buttonX and mx <= buttonX + labelColorPicker.buttonW * SCALE
+        and my >= buttonY and my <= buttonY + labelColorPicker.buttonH * SCALE then
+        labelColorPicker.open = not labelColorPicker.open
+        return
+    end
+    if not labelColorPicker.open then return end
+
+    for channel = 1, #labelColorChannels do
+        local x, y, w, h = GetLabelColorChannelRect(channel)
+        if mx >= x and mx <= x + w and my >= y and my <= y + h then
+            labelColorPicker.dragChannel = channel
+            SetLabelColorChannel(channel, mx)
+            return
+        end
+    end
+end
+
+local function DrawLabelColorPicker()
+    local x, y = labelColorPicker.x * SCALE, labelColorPicker.y * SCALE
+    local buttonW, buttonH = labelColorPicker.buttonW * SCALE,
+        labelColorPicker.buttonH * SCALE
+    SetControlFont()
+    gfx.set(0.2, 0.2, 0.2, 1)
+    gfx.rect(x, y, buttonW, buttonH, 1)
+    gfx.set(0.9, 0.9, 0.9, 1)
+    local buttonText = "Label Color"
+    local textW, textH = gfx.measurestr(buttonText)
+    gfx.x = x + 12 * SCALE
+    gfx.y = y + (buttonH - textH) / 2
+    gfx.drawstr(buttonText)
+    gfx.set(handLabels.color.r, handLabels.color.g, handLabels.color.b, 1)
+    gfx.rect(x + buttonW - 44 * SCALE, y + 8 * SCALE, 32 * SCALE, 24 * SCALE, 1)
+
+    if not labelColorPicker.open then return end
+
+    local panelX, panelY = x, (labelColorPicker.y + 44) * SCALE
+    local panelW, panelH = 420 * SCALE, 160 * SCALE
+    gfx.set(0.12, 0.12, 0.12, 0.96)
+    gfx.rect(panelX, panelY, panelW, panelH, 1)
+    SetControlFont()
+    for channel = 1, #labelColorChannels do
+        local trackX, trackY, trackW, trackH = GetLabelColorChannelRect(channel)
+        local key = labelColorChannels[channel]
+        gfx.set(0.9, 0.9, 0.9, 1)
+        gfx.x = x + 12 * SCALE
+        local _, channelTextH = gfx.measurestr(labelColorChannelNames[channel])
+        gfx.y = trackY + (trackH - channelTextH) / 2
+        gfx.drawstr(labelColorChannelNames[channel])
+        for segment = 0, 31 do
+            local value = segment / 31
+            local red = key == "r" and value or handLabels.color.r
+            local green = key == "g" and value or handLabels.color.g
+            local blue = key == "b" and value or handLabels.color.b
+            gfx.set(red, green, blue, 1)
+            gfx.rect(trackX + trackW * segment / 32, trackY,
+                trackW / 32 + 1, trackH, 1)
+        end
+        gfx.set(1, 1, 1, 1)
+        gfx.circle(trackX + handLabels.color[key] * trackW,
+            trackY + trackH / 2, 5 * SCALE, 1)
+        gfx.set(0.7, 0.7, 0.7, 1)
+        gfx.x = trackX + trackW + 8 * SCALE
+        gfx.y = trackY
+        gfx.drawstr(string.format("%d", math.floor(handLabels.color[key] * 255 + 0.5)))
+    end
+end
+
 local function loop()
     updEvents()
     local playstate = r.GetPlayState()
@@ -676,19 +897,33 @@ local function loop()
 
     local mouseDown = gfx.mouse_cap & 1 == 1
     local mousePressed = mouseDown and not sliderMouseDown
+    local wasDraggingHandAlpha = draggingSlider == "handAlpha"
     UpdateSlider("offset", mousePressed)
     UpdateSlider("handAlpha", mousePressed)
+    if wasDraggingHandAlpha and not mouseDown then
+        settings.handAlpha = slider.handAlpha.value
+        SaveSettings()
+    end
     UpdateScaleSelector(mousePressed)
+    UpdateHandLabels(mousePressed)
+    local wasDraggingLabelColor = labelColorPicker.dragChannel ~= nil
+    UpdateLabelColorPicker(mousePressed, mouseDown)
+    if wasDraggingLabelColor and not mouseDown then
+        SaveSettings()
+    end
     sliderMouseDown = mouseDown
     kick.curframe = math.floor(kick.state * 7 + 0.5)
     hihat.curframe = math.floor(hihat.state * 7 + 0.5)
-    DrawSpriteFrame(1,hihat.curframe,hihat.posX,hihat.posY)
-    DrawSpriteFrame(2,kick.curframe,kick.posX,kick.posY)
-    DrawHand(3, hands.L)
+    DrawPart(1,hihat)       --param 1 = image idx, param 2 = part 
+    DrawPart(2,kick)
+    DrawHand(3, hands.L)    --same params as DrawPart, but using hands
     DrawHand(4, hands.R)
     DrawSlider("offset", "Offset")
     DrawSlider("handAlpha", "Hand Opacity")
     DrawScaleSelector()
+    DrawHandLabelsToggle()
+    DrawLabelColorPicker()
+    
     gfx.update()
         if gfx.getchar() ~= -1 then
             r.defer(loop)
