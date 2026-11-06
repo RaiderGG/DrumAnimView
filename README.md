@@ -22,8 +22,8 @@ A small Reaper visualization script that turns Rock Band style drummer animation
 2. Copy `DrumAnimView` folder to `%appdata%\REAPER\Scripts`
 3. In REAPER, go to `Actions` **>** `Show action list...`
 4. Click `New action...` and then `Load ReaScript`  
-	4.1. Navigate to `%appdata%\REAPER\Scripts`  
-	4.2. Select `.lua` and click `Open`  
+	4.1. Navigate to `%appdata%\REAPER\Scripts\DrumAnimView`  
+	4.2. Select `DrumAnimView.lua` and click `Open`  
 	4.3. Optionally, add a keybind, or use the Menu Editor to add the action to a toolbar
 
 ## Usage
