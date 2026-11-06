@@ -1,5 +1,5 @@
 local r = reaper
-local isImGui = "off"
+--local isImGui = "off"
 local gfx = _G.gfx
 if type(r.ImGui_GetBuiltinPath) == "function" then
     package.path = r.ImGui_GetBuiltinPath() .. "/?.lua;" .. package.path
@@ -7,10 +7,10 @@ if type(r.ImGui_GetBuiltinPath) == "function" then
 end
 if package.loaded["gfx2imgui"] or package.preload["gfx2imgui"]
     or package.searchpath("gfx2imgui", package.path) then
-    isImGui = "on"
+    --isImGui = "on"
     gfx = require "gfx2imgui"
 end
-r.ShowConsoleMsg("ImGui mode = " .. isImGui)
+--r.ShowConsoleMsg("ImGui mode = " .. isImGui)
 local script_folder = string.gsub(debug.getinfo(1).source:match("@?(.*[\\|/])"),"\\","/")
 local assets_folder = script_folder .. "assets/"
 local settings_file = script_folder .. "settings.ini"
