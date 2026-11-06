@@ -22,8 +22,8 @@ A small Reaper visualization script that turns Rock Band style drummer animation
 2. Copy `DrumAnimView` folder to `%appdata%\REAPER\Scripts`
 3. In REAPER, go to `Actions` **>** `Show action list...`
 4. Click `New action...` and then `Load ReaScript`  
-	4.1. Navigate to `%appdata%\REAPER\Scripts`  
-	4.2. Select `.lua` and click `Open`  
+	4.1. Navigate to `%appdata%\REAPER\Scripts\DrumAnimView`  
+	4.2. Select `DrumAnimView.lua` and click `Open`  
 	4.3. Optionally, add a keybind, or use the Menu Editor to add the action to a toolbar
 
 ## Usage
@@ -52,13 +52,13 @@ Lowpoly Drumstick
 
 Author: Jiří Kuba (@kuba.jirka)
  Source: https://sketchfab.com/3d-models/lowpoly-drumstick-0cab2eab9d3a45aba4f68f72bfa5ae1e
- License: Sketchfab Free Standard License
+ License: Creative Commons Attribution 4.0 International (CC BY 4.0)
 
 LJAS - Alesis Crimson Mesh Kit
 
 Author: La Jarre à Son (@la_jarre_a_son)
  Source: https://sketchfab.com/3d-models/ljas-alesis-crimson-mesh-kit-015965ea26c34902afdf7a843c9c03d4
- License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+ License: Sketchfab Free Standard License
 
 Hand (low poly)
 
